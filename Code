@@ -5,9 +5,9 @@
 #include <PubSubClient.h>
 
 // WiFi and Ubidots configuration
-#define WIFISSID "vivo 1921"                  // Your Wi-Fi SSID
-#define PASSWORD "7597131103"              // Your Wi-Fi password
-#define TOKEN "BBUS-90R3bzi7ysJfDZxG8vcRhoIN0oPnfh" // Your Ubidots TOKEN
+#define WIFISSID "Wi-Fi SSID"                  // Your Wi-Fi SSID
+#define PASSWORD " Wi-Fi password"              // Your Wi-Fi password
+#define TOKEN "Ubidots TOKEN" // Your Ubidots TOKEN
 #define DEVICE_LABEL "esp132"             // Your device label for Ubidots
 #define VARIABLE_LABEL_HR "heartrate"      // Variable label for heart rate
 #define VARIABLE_LABEL_SPO2 "spo2"         // Variable label for SpO2
