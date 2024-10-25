@@ -1,0 +1,156 @@
+#include <Wire.h>
+#include "MAX30100_PulseOximeter.h"
+#include <Adafruit_MLX90614.h>
+#include <WiFiS3.h>
+#include <PubSubClient.h>
+
+// WiFi and Ubidots configuration
+#define WIFISSID "Wi-Fi SSID" // Your Wi-Fi SSID
+#define PASSWORD "Wi-Fi password" // Your Wi-Fi password
+#define TOKEN "Ubidots TOKEN" // Your Ubidots TOKEN
+#define DEVICE_LABEL "esp132" // Your device label for Ubidots
+#define VARIABLE_LABEL_HR "heartrate" // Variable label for heart rate
+#define VARIABLE_LABEL_SPO2 "spo2" // Variable label for SpO2
+#define VARIABLE_LABEL_TEMP "temperature" // Variable label for temperature
+#define VARIABLE_LABEL_ECG "ecgvalue" // Variable label for ECG value
+#define MQTT_CLIENT_NAME "ESP32_MLX_MAX30100" // MQTT client name
+
+#define ECG_PIN A0 // Define the pin for ECG sensor (AD8232 connected to A0)
+#define REPORTING_PERIOD_MS 1000 // Data reporting period (1 second)
+
+// Sensor objects
+PulseOximeter pox; // Pulse Oximeter object for MAX30100
+Adafruit_MLX90614 mlx = Adafruit_MLX90614(); // MLX90614 temperature sensor
+uint32_t tsLastReport = 0; // Time for the last data report
+
+// WiFi and MQTT clients
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+// Buffers for MQTT topic and payload
+char topic[150];
+char payload[700];
+
+// Function to connect to Wi-Fi
+void setup_wifi() {
+delay(10);
+Serial.println();
+Serial.print("Connecting to ");
+Serial.println(WIFISSID);
+WiFi.begin(WIFISSID, PASSWORD);
+
+while (WiFi.status() != WL_CONNECTED) {
+delay(1000);
+Serial.print(".");
+}
+
+Serial.println();
+Serial.println("WiFi connected");
+Serial.println("IP address: ");
+Serial.println(WiFi.localIP());
+}
+
+// Function to reconnect to MQTT broker
+void reconnect() {
+while (!client.connected()) {
+Serial.print("Attempting MQTT connection...");
+if (client.connect(MQTT_CLIENT_NAME, TOKEN, "")) {
+Serial.println("connected");
+} else {
+Serial.print("failed, rc=");
+Serial.print(client.state());
+Serial.println(" try again in 2 seconds");
+delay(2000);
+}
+}
+}
+
+// Callback routine executed when a pulse is detected
+void onBeatDetected() {
+Serial.println("Beat Detected!");
+}
+
+void setup() {
+Serial.begin(115200); // Begin Serial communication
+setup_wifi(); // Connect to Wi-Fi
+client.setServer("industrial.api.ubidots.com", 1883);
+
+// Initialize the MAX30100 Pulse Oximeter
+Serial.print("Initializing MAX30100 Pulse Oximeter...");
+if (!pox.begin()) {
+Serial.println("FAILED");
+for (;;); // Stuck here if initialization fails
+} else {
+Serial.println("SUCCESS");
+}
+
+// Set the IR LED current for the MAX30100
+pox.setIRLedCurrent(MAX30100_LED_CURR_7_6MA);
+pox.setOnBeatDetectedCallback(onBeatDetected);
+
+// Initialize the MLX90614 temperature sensor
+Serial.print("Initializing MLX90614 Temperature Sensor...");
+if (!mlx.begin()) {
+Serial.println("FAILED");
+for (;;); // Stuck here if initialization fails
+} else {
+Serial.println("SUCCESS");
+}
+
+// Initialize ECG pin as input
+pinMode(ECG_PIN, INPUT);
+Serial.println("ECG Sensor Initialized...");
+}
+
+void loop() {
+if (!client.connected()) {
+reconnect();
+}
+
+// Update the MAX30100 sensor readings
+pox.update();
+
+// Read ECG analog signal from the AD8232
+int ecgValue = analogRead(ECG_PIN);
+
+// Send data to Ubidots every REPORTING_PERIOD_MS
+if (millis() - tsLastReport > REPORTING_PERIOD_MS) {
+// Get heart rate and SpO2
+float heartRate = pox.getHeartRate();
+float spo2 = pox.getSpO2();
+
+// Read the ambient and object temperature from MLX90614
+float ambientTemp = mlx.readAmbientTempC();
+float objectTemp = mlx.readObjectTempC();
+
+// Print values to Serial Monitor
+Serial.print("Heart rate: ");
+Serial.print(heartRate);
+Serial.print(" bpm / SpO2: ");
+Serial.print(spo2);
+Serial.println(" %");
+
+Serial.print("Ambient Temperature: ");
+Serial.print(ambientTemp);
+Serial.println(" °C");
+
+Serial.print("Object Temperature: ");
+Serial.print(objectTemp);
+Serial.println(" °C");
+
+Serial.print("ECG Value: ");
+Serial.println(ecgValue);
+
+// Create topic and payload
+sprintf(topic, "/v1.6/devices/%s", DEVICE_LABEL);
+sprintf(payload, "{"%s": {"value": %.2f}, "%s": {"value": %.2f}, "%s": {"value": %.2f}, "%s": {"value": %d}}",
+VARIABLE_LABEL_HR, heartRate, VARIABLE_LABEL_SPO2, spo2, VARIABLE_LABEL_TEMP, objectTemp, VARIABLE_LABEL_ECG, ecgValue);
+
+// Publish data to Ubidots
+client.publish(topic, payload);
+client.loop(); // Handle MQTT client
+
+// Update last report time
+tsLastReport = millis();
+}
+}
